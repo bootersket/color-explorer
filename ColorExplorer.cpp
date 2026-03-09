@@ -342,14 +342,14 @@ ColorRGBi convert_CIEXYZ_to_color_space(Eigen::Vector3d CIEXYZ, ColorSpace color
     int b = bN * 255;
 
     // Clamp negative values
-    // r = std::max(0.0f, r);
-    // g = std::max(0.0f, g);
-    // b = std::max(0.0f, b);
+    r = std::max(0, r);
+    g = std::max(0, g);
+    b = std::max(0, b);
 
-    // // Clamp values over 255
-    // r = std::min(r, 255.0f);
-    // g = std::min(g, 255.0f);
-    // b = std::min(b, 255.0f);
+    // Clamp values over 255
+    r = std::min(r, 255);
+    g = std::min(g, 255);
+    b = std::min(b, 255);
 
     if (VERBOSE) {
         std::cout << "\nConverting CIEXYZ to color space" << std::endl;
@@ -372,7 +372,7 @@ ColorRGBi convert_CIEXYZ_to_color_space(Eigen::Vector3d CIEXYZ, ColorSpace color
 int main() {
     int width, height, channels;
     // unsigned char* data = stbi_load("inbetween.png", &width, &height, &channels, 0);
-    unsigned char* data = stbi_load("color_test.png", &width, &height, &channels, 0);
+    unsigned char* data = stbi_load("landscape.png", &width, &height, &channels, 0);
     if (!data) {
         std::cout << "ERROR: failed to load image" << std::endl;
         return -1;
@@ -405,7 +405,7 @@ int main() {
         // std::cout << std::endl;
 
         // Eigen::Vector3d otherRGB = convert_CIEXYZ_to_color_space(CIE_XYZ, wideGamutRGB);
-        ColorRGBi convertedColor = convert_CIEXYZ_to_color_space(CIE_XYZ, wideGamutRGB);
+        ColorRGBi convertedColor = convert_CIEXYZ_to_color_space(CIE_XYZ, orangeBiasedRGB);
         // if (otherRGB.x() > 255) std::cout << "red max=" << otherRGB.x() << std::endl;
         // if (otherRGB.y() > 255) std::cout << "green max=" << otherRGB.y() << std::endl;
         // if (otherRGB.z() > 255) std::cout << "blue max=" << otherRGB.z() << std::endl;
@@ -445,22 +445,34 @@ int main() {
     std::cout << "wideGamutRGB.matrix: \n";
     std::cout << wideGamutRGB.matrix << std::endl;
 
+    std::cout << std::endl;
+    std::cout << "orangeBiasedRGB.matrix: \n";
+    std::cout << orangeBiasedRGB.matrix << std::endl;
+
     ColorRGBi red = {255, 0, 0};
     ColorRGBi green = {0, 255, 0};
     ColorRGBi blue = {0, 0, 255};
-
+    ColorRGBi converted;
 
 
     Eigen::Vector3d red_sRGB_XYZ = convert_color_space_to_CIEXYZ(red, sRGB);
     Eigen::Vector3d red_wideGamutRGB_XYZ = convert_color_space_to_CIEXYZ(red, wideGamutRGB);
-
-    ColorRGBi converted = convert_CIEXYZ_to_color_space(red_sRGB_XYZ, wideGamutRGB);
+    converted = convert_CIEXYZ_to_color_space(red_sRGB_XYZ, wideGamutRGB);
     std::cout << "\nconverted: " << std::endl;
     printColorRGBi(converted);
 
-    std::cout << "wide gamut matrix & inverse: " << std::endl;
-    std::cout << wideGamutRGB.matrix << std::endl << std::endl;
-    std::cout << wideGamutRGB.matrix.inverse() << std::endl << std::endl;
+
+    Eigen::Vector3d green_sRGB_XYZ = convert_color_space_to_CIEXYZ(green, sRGB);
+    Eigen::Vector3d green_wideGamutRGB_XYZ = convert_color_space_to_CIEXYZ(green, wideGamutRGB);
+    converted = convert_CIEXYZ_to_color_space(green_sRGB_XYZ, wideGamutRGB);
+    std::cout << "\nconverted: " << std::endl;
+    printColorRGBi(converted);
+
+    Eigen::Vector3d blue_sRGB_XYZ = convert_color_space_to_CIEXYZ(blue, sRGB);
+    Eigen::Vector3d blue_wideGamutRGB_XYZ = convert_color_space_to_CIEXYZ(blue, wideGamutRGB);
+    converted = convert_CIEXYZ_to_color_space(blue_sRGB_XYZ, wideGamutRGB);
+    std::cout << "\nconverted: " << std::endl;
+    printColorRGBi(converted);
 
 
 
