@@ -57,6 +57,8 @@ float transferFunction(float value) {
 }
 ```
 
+Edit: I understand gamma a bit better so writing it down here. Cameras capture light linearly, but human eyes don't perceive light linearly. So this linear light is encoded into the images via something like `x^(1/2.2)`. This has the effect of making lower values have a much higher rate of change. This is because humans can see much more variation at lower lights compared to higher lights. Then when converting to linear, we "gamma decode" with a function like `x^2.2`. We convert to linear space because the graphics operations and modifiations we're doing are modeling real light, which is linear. This encoding/decoding is just to appease our pesky human senses, which are non-linear. A second benefit is that, by encoding gamma into image data, it avoids pointless wasting of bits storing light data that is insignificant to human perception i.e. it puts more values where the eye notices (shadows, dark areas, etc.)
+
 
 <u>Convert to XYZ:</u>
 
@@ -385,6 +387,10 @@ Then move the red primary into the orange. It currently is at (.64, .33), so let
 Here's where that lands on the CIE diagram:
 
 <img src="docs_images/orangeBiased_redPrimary.png" width="300">
+
+Here's what the modified color space looks like compared to sRGB:
+
+<img src="docs_images/orangeBiased_colorSpace.png" width="300">
 
 So we can define a new RGB color space by changing xr and yr, which if you recall are some of the inputs into the process of calculating a conversion matrix.
 
