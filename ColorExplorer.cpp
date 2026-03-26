@@ -15,11 +15,12 @@ ColorSpace g_colorSpaceA;
 ColorSpace g_colorSpaceB;
 float g_gammaExponentA;
 float g_gammaExponentB;
+float g_blackPointLift;
 
 
 
 
-Eigen::Vector3d convert_color_space_to_CIEXYZ(ColorRGBi color);
+Eigen::Vector3d convert_color_space_to_CIEXYZ(ColorRGBi color, ColorSpace colorSpace);
 
 
 
@@ -48,7 +49,8 @@ void printColorRGBi(ColorRGBi color) {
 
 /* Gamma decode */
 /* Step 1 */
-float inverseTransferFunction(float value) {
+// float inverseTransferFunction(float value) {
+float srgbToLinear(float value) {
     /*
     Source: https://en.wikipedia.org/wiki/SRGB#Transfer_function_(%22gamma%22)
     */
@@ -58,7 +60,8 @@ float inverseTransferFunction(float value) {
 
 /* Gamma encode */
 /* Step 2 */
-float transferFunction(float value) {
+// float transferFunction(float value) {
+float linearToSrgb(float value) {
     /*
     Source: https://en.wikipedia.org/wiki/SRGB#Transfer_function_(%22gamma%22)
     */
@@ -66,8 +69,16 @@ float transferFunction(float value) {
    else return 1.055*std::pow(value, 1/2.4) - 0.055;
 }
 
+float applyBlackPointLift(float c) {
+    return c * (1-g_blackPointLift) + g_blackPointLift;
+}
+
+float applyBlackPointLift_naive(float c) {
+    return c + g_blackPointLift;
+}
+
 // Eigen::Vector2d convert_color_space_to_CIE_chromaticity(ColorRGBi color, ColorSpace colorSpace) {
-Eigen::Vector2d convert_color_space_to_CIE_chromaticity(ColorRGBi color) {
+Eigen::Vector2d convert_color_space_to_CIE_chromaticity(ColorRGBi color, ColorSpace colorSpace) {
     /*
     Assumes args are in range of 0-255.
     Currently just prints values out during the process; returns nothing.
@@ -84,7 +95,7 @@ Eigen::Vector2d convert_color_space_to_CIE_chromaticity(ColorRGBi color) {
     // Eigen::Vector3d CIEXYZ = convert_color_space_to_CIEXYZ(color, colorSpace);
     // todo havent really used this func since changing the overall logic to use global g_colorSpaceX vars, so not sure logically if this makes sense for this func i.e. should
     // todo it be using colorSpaceA aka the starting color space? So beware that this may have a weird/unexpected result
-    Eigen::Vector3d CIEXYZ = convert_color_space_to_CIEXYZ(color);
+    Eigen::Vector3d CIEXYZ = convert_color_space_to_CIEXYZ(color, colorSpace);
     float X = CIEXYZ.x();
     float Y = CIEXYZ.y();
     float Z = CIEXYZ.z();
@@ -117,7 +128,7 @@ Eigen::Vector2d convert_color_space_to_CIE_chromaticity(ColorRGBi color) {
 chromaticity, which turns it from 3-dimensional to 2-dimensional */
 /* STEP 1 */
 // Eigen::Vector3d convert_color_space_to_CIEXYZ(ColorRGBi color, ColorSpace colorSpace) {
-Eigen::Vector3d convert_color_space_to_CIEXYZ(ColorRGBi color) {
+Eigen::Vector3d convert_color_space_to_CIEXYZ(ColorRGBi color, ColorSpace colorSpace) {
     /*
     Assumes args are in range of 0-255.
     Currently just prints values out during the process; returns nothing.
@@ -134,40 +145,38 @@ Eigen::Vector3d convert_color_space_to_CIEXYZ(ColorRGBi color) {
    int g = color.g;
    int b = color.b;
 
-    /* Starting values */
-    if (VERBOSE) {
-        std::cout << "\nstarting values: ";
-        print3i(r, g, b);
-    }
 
     /* Normalize RGB */
     float rN = r / 255.0;
     float gN = g / 255.0;
     float bN = b / 255.0;
-    if (VERBOSE) {
-        std::cout << "Normalized RGB: ";
-        print3f(rN, gN, bN);
-    }
 
     /* Convert to linear RGB (decode gamma) */
-    // float rL = inverseTransferFunction(rN);
-    // float gL = inverseTransferFunction(gN);
-    // float bL = inverseTransferFunction(bN);
+    // float rL = srgbToLinear(rN);
+    // float gL = srgbToLinear(gN);
+    // float bL = srgbToLinear(bN);
     float rL = std::pow(rN, g_gammaExponentA);
     float gL = std::pow(gN, g_gammaExponentA);
     float bL = std::pow(bN, g_gammaExponentA);
-    if (VERBOSE) {
-        std::cout << "Linear RGB:";
-        print3f(rL, gL, bL);
-    }
+
+    rL = applyBlackPointLift(rL);
+    gL = applyBlackPointLift(gL);
+    bL = applyBlackPointLift(bL);
 
     /* Convert to CIE XYZ (aka device-independent values) */
     Eigen::Vector3d linearRGB{rL, gL, bL};
-    Eigen::Vector3d CIE_XYZ = g_colorSpaceA.matrix * linearRGB;
+    Eigen::Vector3d CIE_XYZ = colorSpace.matrix * linearRGB;
     float X = CIE_XYZ.x();
     float Y = CIE_XYZ.y();
     float Z = CIE_XYZ.z();
+
     if (VERBOSE) {
+        std::cout << "\n\nConverting color space to CIEXYZ\n";
+        print3i(r, g, b);
+        std::cout << "Normalized RGB: ";
+        print3f(rN, gN, bN);
+        std::cout << "Linear RGB:";
+        print3f(rL, gL, bL);
         std::cout << "CIE XYZ: ";
         print3f(X, Y, Z);
     }
@@ -182,10 +191,10 @@ bool g_useToneError = false;
 float g_toneError = 1.0f;
 /* STEP 2 */
 // ColorRGBi convert_CIEXYZ_to_color_space(Eigen::Vector3d CIEXYZ, ColorSpace colorSpace) {
-ColorRGBi convert_CIEXYZ_to_color_space(Eigen::Vector3d CIEXYZ) {
+ColorRGBi convert_CIEXYZ_to_color_space(Eigen::Vector3d CIEXYZ, ColorSpace colorSpace) {
 
     /* Convert from CIEXYZ to linear RGB */
-    Eigen::Vector3d linearRGB = g_colorSpaceB.matrix.inverse() * CIEXYZ;
+    Eigen::Vector3d linearRGB = colorSpace.matrix.inverse() * CIEXYZ;
     float rL = linearRGB[0];
     float gL = linearRGB[1];
     float bL = linearRGB[2];
@@ -196,15 +205,24 @@ ColorRGBi convert_CIEXYZ_to_color_space(Eigen::Vector3d CIEXYZ) {
     //     gL = std::pow(gL, g_toneError);
     //     bL = std::pow(bL, g_toneError);
     // }
+    /* Apply blackpoint lift (simulate black point issue) */
+    // todo should this go in step 1 or step 2? I don't think it matters when both color spaces are the same, but does it have a different effect when using two color spaces?
+    // rL = applyBlackPointLift_naive(rL);
+    // gL = applyBlackPointLift_naive(gL);
+    // bL = applyBlackPointLift_naive(bL);
+    // rL = applyBlackPointLift(rL);
+    // gL = applyBlackPointLift(gL);
+    // bL = applyBlackPointLift(bL);
 
     /* Encode gamma */
     /* N because these are still normalized (i.e. in range 0.0 - 1.0) */
-    // float rN = transferFunction(rL);
-    // float gN = transferFunction(gL);
-    // float bN = transferFunction(bL);
+    // float rN = linearToSrgb(rL);
+    // float gN = linearToSrgb(gL);
+    // float bN = linearToSrgb(bL);
     float rN = std::pow(rL, 1/g_gammaExponentB);
     float gN = std::pow(gL, 1/g_gammaExponentB);
     float bN = std::pow(bL, 1/g_gammaExponentB);
+    
 
     /* Convert to range 0 - 255 */
     int r = rN * 255;
@@ -239,8 +257,7 @@ ColorRGBi convert_CIEXYZ_to_color_space(Eigen::Vector3d CIEXYZ) {
 
 
 /* Assuming output channels is 4 but pixels are is 3 (default to full alpha channel) */
-void saveImage(std::string filename, std::vector<ColorRGBi> pixels, int width, int height) {
-    const int channels = 4;
+void saveImage(std::string filename, std::vector<ColorRGBi> pixels, int width, int height, int channels) {
     // static unsigned char pixelsBytes[width*height*channels];
     unsigned char *pixelsBytes = (unsigned char*)malloc(width*height*channels);
     int pixelsBytesIndex = 0;
@@ -250,8 +267,10 @@ void saveImage(std::string filename, std::vector<ColorRGBi> pixels, int width, i
         pixelsBytes[pixelsBytesIndex+0] = pixel.r;
         pixelsBytes[pixelsBytesIndex+1] = pixel.g;
         pixelsBytes[pixelsBytesIndex+2] = pixel.b;
-        pixelsBytes[pixelsBytesIndex+3] = 255;
-        pixelsBytesIndex+=channels;
+        if (channels == 4) {
+            pixelsBytes[pixelsBytesIndex+3] = 255;
+        }
+        pixelsBytesIndex += channels;
     }
     stbi_write_png(filename.c_str(), width, height, channels, pixelsBytes, width*channels);
 }
@@ -275,20 +294,32 @@ void convertAndSave(std::string fileIn, std::string fileOut) {
     std::vector<ColorRGBi> newImagePixels;
 
     for (int i=0; i<width*height*channels; i+=channels) {
+        // int N = width*height*channels;
+        // float percentage = (float)i/(float)N*100;
+        // if (percentage/10.0 == (int)percentage/10) {
+        //     std::cout << percentage << "%" << std::endl;
+        // }
         int pixel = (int)data[i];
         int r = data[i + 0];
         int g = data[i + 1];
         int b = data[i + 2];
-        int a = data[i + 3];
+        if (channels == 4) {
+            int a = data[i + 3];
+        }
 
         ColorRGBi color = {r, g, b};
 
-        Eigen::Vector3d CIE_XYZ = convert_color_space_to_CIEXYZ(color);
-        ColorRGBi convertedColor = convert_CIEXYZ_to_color_space(CIE_XYZ);
+        Eigen::Vector3d CIE_XYZ = convert_color_space_to_CIEXYZ(color, g_colorSpaceA);
+        ColorRGBi convertedColor = convert_CIEXYZ_to_color_space(CIE_XYZ, g_colorSpaceB);
+
+        // if (VERBOSE) {
+        //     Eigen::Vector3d convertedXYZ = convert_CIEXYZ_to_color_space
+        //     std::cout << "final converted RGB value as XYZ: "; 
+        // }
 
         newImagePixels.push_back(convertedColor);
     }
-    saveImage(fileOut, newImagePixels, width, height);
+    saveImage(fileOut, newImagePixels, width, height, channels);
 
     stbi_image_free(data);
 
@@ -298,6 +329,13 @@ void convertAndSave(std::string fileIn, std::string fileOut) {
 void makeBatch() {
     std::vector<std::string> filenames_in = {
         "batch/color_test_ref.png",
+        "batch/greyramp.png",
+        "batch/patch_lightgrey.png",
+        "batch/patch_darkgrey.png",
+        "batch/patch_red.png",
+        "batch/patch_green.png",
+        "batch/patch_blue.png",
+        "batch/patch_purple.png",
         "batch/landscape_ref.png",
         "batch/gi0_ref.png",
         "batch/gi1_ref.png",
@@ -312,6 +350,13 @@ void makeBatch() {
     };
     std::vector<std::string> filenames_out = {
         "batch/color_test_miscal.png",
+        "batch/greyramp_miscal.png",
+        "batch/patch_lightgrey_miscal.png",
+        "batch/patch_darkgrey_miscal.png",
+        "batch/patch_red_miscal.png",
+        "batch/patch_green_miscal.png",
+        "batch/patch_blue_miscal.png",
+        "batch/patch_purple_miscal.png",
         "batch/landscape_miscal.png",
         "batch/gi0_miscal.png",
         "batch/gi1_miscal.png",
@@ -324,10 +369,57 @@ void makeBatch() {
         "batch/gi8_miscal.png",
         "batch/gi9_miscal.png"
     };
+    if (filenames_in.size() != filenames_out.size()) {
+        std::cout << "ERROR: filenames_in and filenames_out do not have the same number of elements" << std::endl;
+        return;
+    }
     for (int i=0; i<filenames_in.size(); i++) {
         std::cout << "converting " << filenames_in[i] << " (" << i+1 << "/" << filenames_in.size() << ")" << std::endl;
         convertAndSave(filenames_in[i], filenames_out[i]);
     }
+}
+
+void makeTestPatch(std::string filename, ColorRGBi color, int width, int height, int channels) {
+    if (channels != 4) {
+        std::cout << "ERROR: idk if makeTestPatch will work with number of channels besides 4" << std::endl;
+        return;
+    }
+    unsigned char *pixelsBytes = (unsigned char*)malloc(width*height*channels);
+    for (int i=0; i<width*height; i++) {
+        pixelsBytes[i*4 + 0] = color.r;
+        pixelsBytes[i*4 + 1] = color.g;
+        pixelsBytes[i*4 + 2] = color.b;
+        pixelsBytes[i*4 + 3] = 255;
+    }
+    stbi_write_png(filename.c_str(), width, height, channels, pixelsBytes, width*channels);
+}
+
+
+/*
+In a real-world color calibration scenario, you would send an RGB value to the display and measure
+the displayed color with a colorimeter. This would yield an XYZ value (a device-independent measurement of
+the perceived color being displayed). You would then compare this actual XYZ to the expected XYZ and
+compute a color conversion matrix.
+In this "simulated miscalibration" scenario, I'm not displaying a reference image on a miscalibrated display,
+but I still need a way to get the "measured" XYZ. So we simulate the miscalibration by converting the
+input RGB to the other color space, then treat it as the original color space and calculate the XYZ
+value when the converted color is displayed in the initial color space. This gives the same effect as
+displaying the color on a miscalibrated display and measuring the XYZ.
+*/
+Eigen::Vector3d simulateColorimeter(ColorRGBi color, ColorSpace colorSpaceA, ColorSpace colorSpaceB) {
+    Eigen::Vector3d refXYZ = convert_color_space_to_CIEXYZ(color, colorSpaceA);
+    ColorRGBi convertedRGB = convert_CIEXYZ_to_color_space(refXYZ, colorSpaceB);
+    Eigen::Vector3d measuredXYZ = convert_color_space_to_CIEXYZ(convertedRGB, colorSpaceA);
+
+    std::cout << "Input RGB: ";
+    printColorRGBi(color);
+    std::cout << "Expected XYZ: ";
+    print3f(refXYZ.x(), refXYZ.y(), refXYZ.z());
+    std::cout << "Measured XYZ: ";
+    print3f(measuredXYZ.x(), measuredXYZ.y(), measuredXYZ.z());
+    std::cout << std::endl;
+
+    return measuredXYZ;
 }
 
 
@@ -337,6 +429,7 @@ int main() {
     ColorSpace sRGB             {.64, .33, .3, .6, .15, .06, .3127, .3290};
     ColorSpace native           {.64, .33, .3, .6, .15, .06, .285, .321};
     ColorSpace sRGB_D93         {.64, .33, .3, .6, .15, .06, .291, .283};
+    ColorSpace sRGB_D40         {.64, .33, .3, .6, .15, .06, .3804, .3768};
     ColorSpace orangeBiasedRGB  {.55, .4,  .3, .6, .15, .06, .3127, .3290};
     ColorSpace orangeBiasedRGB2 {.55, .4, .32, .65, .14, .038, .3127, .3290};
     ColorSpace magentaBiasedRGB {.55, .4,  .3, .6, 0.320938, 0.154190, .3127, .3290};
@@ -346,41 +439,60 @@ int main() {
     ColorSpace allOffRGB        {.6, .36, .35, .55, .25, .06, .3127, .3290};
     ColorSpace cyanOffRGB       {.64, .33, .34, .50, .17, .06, .3127, .3290};
 
-    std::cout << "sRGB matrix: \n" << sRGB.matrix << std::endl;
-    std::cout << std::endl;
-    std::cout << "sRGB inv matrix: \n" << sRGB.matrix.inverse() << std::endl;
-    std::cout << std::endl;
-    std::cout << "sRGB_D93 matrix: \n" << sRGB_D93.matrix << std::endl;
-    std::cout << std::endl;
-    std::cout << "sRGB_D93 inv matrix: \n" << sRGB_D93.matrix.inverse() << std::endl;
-    std::cout << std::endl;
+    ColorSpace redOff           {.57, .25, .3, .6, .15, .06, .3127, .3290};
+    ColorSpace p3               {.68, .32, .2651, .69, .15, .06, .3127, .3290};
+    ColorSpace p3_d93           {.68, .32, .2651, .69, .15, .06, .28315, .29711};
+    ColorSpace custom           {.57, .25, .38, .57, .19, .06, .3127, .3290};
+
+    std::cout << "sRGB.matrix: " << std::endl;
+    std::cout << sRGB.matrix << std::endl;
     std::cout << std::endl;
 
-    std::cout << "sRGB.matrix.inverse() * sRGB_D93.matrix: " << std::endl;
-    std::cout << sRGB.matrix.inverse() * sRGB_D93.matrix << std::endl;
 
-    /* All the heavy lifting done through here */
-    // convertAndSave(sRGB, sRGB, "landscape.png", "batch/landscape_tone_error.png");
-    // convertAndSave(sRGB, sRGB_D93, "batch/color_test_ref.png", "batch/color_test_miscal.png");
 
-    g_colorSpaceA = sRGB;
-    g_colorSpaceB = yellowedGreenRGB;
-    std::cout << std::endl;
-    std::cout << "g_colorSpaceA.matrix.inverse() * g_colorSpaceB.matrix: " << std::endl;
-    std::cout << g_colorSpaceA.matrix.inverse() * g_colorSpaceB.matrix << std::endl;
 
-    // g_useToneError = false;
-    // g_toneError = 1.8;
+    // ^ From the ground up
     g_gammaExponentA = 2.4;
     g_gammaExponentB = 2.4;
+    g_blackPointLift = 0.15;
+    g_colorSpaceA = sRGB;
+    g_colorSpaceB = sRGB;
 
-    // for (int i=0; i<256; i++) {
-    //     std::cout << "transferFunc(" << i << "): " << transferFunction(i) << std::endl;
-    // }
+    ColorRGBi red = {255, 0, 0};
+    Eigen::Vector3d redMeasuredXYZ = simulateColorimeter(red, g_colorSpaceA, g_colorSpaceB);
 
-    // convertAndSave("landscape.png", "batch/landscape_tone_error.png");
-    // convertAndSave("landscape.png", "batch/landscape_miscal.png");
+    ColorRGBi green = {0, 255, 0};
+    Eigen::Vector3d greenMeasuredXYZ = simulateColorimeter(green, g_colorSpaceA, g_colorSpaceB);
 
-    makeBatch();
+    ColorRGBi blue = {0, 0, 255};
+    Eigen::Vector3d blueMeasuredXYZ = simulateColorimeter(blue, g_colorSpaceA, g_colorSpaceB);
 
+    ColorRGBi purple = {152, 32, 119};
+    Eigen::Vector3d purpleMeasuredXYZ = simulateColorimeter(purple, g_colorSpaceA, g_colorSpaceB);
+
+
+
+    /* Make weird color conversion fuckery matrix */
+    Eigen::Matrix3d M_bad; // This matrix will convert from RGB value to the displayed XYZ on the "bad" display
+    M_bad << 
+        redMeasuredXYZ.x(), greenMeasuredXYZ.x(), blueMeasuredXYZ.x(),
+        redMeasuredXYZ.y(), greenMeasuredXYZ.y(), blueMeasuredXYZ.y(),
+        redMeasuredXYZ.z(), greenMeasuredXYZ.z(), blueMeasuredXYZ.z();
+
+    std::cout << "M_bad: " << std::endl;
+    std::cout << M_bad << std::endl;
+
+    Eigen::Matrix3d ccm = M_bad.inverse() * g_colorSpaceA.matrix;
+    std::cout << std::endl;
+    std::cout << "Proposed color correction matrix: M_bad.inverse() * sRGB.matrix: " << std::endl;
+    std::cout << ccm << std::endl;
+
+    // convertAndSave("batch/greyramp.png", "batch/greyramp_miscal.png");
+
+
+
+    // makeBatch();
+    std::cout << srgbToLinear(.000978) << std::endl;
+
+        
 }
